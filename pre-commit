@@ -1,0 +1,114 @@
+#!/usr/bin/env tcsh
+#
+#################################################################
+#
+# Copyright (c) 2025 YottaDB LLC and/or its subsidiaries.
+# All rights reserved.
+#
+#       This source code contains the intellectual property
+#       of its copyright holder(s), and is made available
+#       under a license.  If you do not know the terms of
+#       the license, please stop and do not read further.
+#
+#################################################################
+#
+# -----------------------------------------------------------------
+# Pre-commit hook that
+#	1) Enforces YottaDB Copyright in changed modules
+#	2) Runs `gofmt`
+#	3) Trims trailing whitespace
+#	4) Runs `go vet`
+#
+set filelist = `git diff --name-only HEAD`
+set fixlist = ""
+set curyear = `date +%Y`
+@ exitstatus = 0
+foreach file ($filelist)
+	scripts/needs_copyright.sh $file
+	if ($status != 0) then
+		continue
+	endif
+	grep 'Copyright (c) .*'$curyear' YottaDB LLC' $file >& /dev/null
+	if ($status != 0) then
+		set fixlist = "$fixlist $file"
+	endif
+end
+if ("" != "$fixlist") then
+	echo "  --> Hook $0 returned non-zero status"
+	echo "  --> Below files are missing YottaDB Copyright notice and/or current year $curyear. Fix and retry commit"
+	foreach file ($fixlist)
+		echo "	$file"
+	end
+	@ exitstatus = 1
+endif
+
+# -----------------------------------------------------------------
+# 2) Run "gofmt"
+# -----------------------------------------------------------------
+set fixlist = ""
+foreach file ($filelist)
+	if (! -e $file) then
+		# If file is being deleted as part of this commit, skip gofmt conversion on it
+		continue
+	endif
+	set extension = $file:e
+	if ("go" != $extension) then
+		# Not a .go file. Cannot run gofmt on this file. Move on to next file in list.
+		continue
+	endif
+	gofmt -e -w $file
+	@ status1 = $status
+	if ($status1) then
+		@ exitstatus = 1
+		echo "GOFMT-E-FAIL : Command [gofmt -e -w $file] failed with status : $status1"
+	endif
+	# Check if there a changes that are unstaged (as opposed to staged and uncommitted)
+	git diff-files --exit-code --name-only -- $file >/dev/null
+	if ($status) then
+		git add $file
+		set fixlist = "  $file\n"
+	endif
+end
+if ("" != "$fixlist") then
+	echo "note: automatically committing gofmt changes for the following files:"
+	echo "$fixlist"
+endif
+
+# ------------------------------------------------------------------------------------------
+# 3) Removes trailing white space (most likely not needed since "gofmt" is done in Step (2)
+# ------------------------------------------------------------------------------------------
+foreach file ($filelist)
+	if (! -e $file) then
+		# If file is being deleted as part of this commit, skip whitespace conversion on it
+		continue
+	endif
+	grep -q '[ 	][ 	]*$' $file
+	if ! ($status) then
+		echo $file
+		sed -i 's/[ 	][ 	]*$//' $file
+		git add $file
+		if ($status) then
+			@ exitstatus = 1
+			echo "GITADD-E-FAIL : Command failed after removing trailing whitespace : git add $file"
+		endif
+	endif
+end
+
+# ------------------------------------------------------------------------------------------
+# 4) Run "go vet"
+# ------------------------------------------------------------------------------------------
+#
+# go vet in go 1.10 is known to issue the following error (see https://github.com/w0rp/ale/issues/1369 for details).
+#	buffer_t_array_test.go:19:2: use of internal package not allowed
+# This is fixed in go 1.11 and higher so run the "go vet" step only if go version is > 1.10
+set gover = `go version | cut -d " " -f 3`
+if (`expr "go1.11.0" \<= "$gover"`) then
+	go vet
+	@ status1 = $status
+	if ($status1) then
+		@ exitstatus = 1
+		echo "GOVET-E-FAIL : Command [go vet] failed with status : $status1"
+	endif
+endif
+
+exit $exitstatus
