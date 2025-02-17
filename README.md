@@ -1,8 +1,8 @@
 # YottaDB Go Wrapper v2
 
-[![Build Status](https://gitlab.com/YottaDB/Lang/YDBGo2/badges/master/build.svg)](https://gitlab.com/YottaDB/Lang/YDBGo/commits/master)
-[![Go Report Card](https://goreportcard.com/badge/gitlab.com/YottaDB/Lang/YDBGo?style=flat-square)](https://goreportcard.com/report/gitlab.com/YottaDB/Lang/YDBGo)
-[![Go Doc](https://img.shields.io/badge/godoc-reference-blue.svg?style=flat-square)](http://godoc.org/gitlab.com/YottaDB/Lang/YDBGo)
+[![Build Status](https://gitlab.com/YottaDB/Lang/YDBGo2/badges/master/build.svg)](https://gitlab.com/YottaDB/Lang/YDBGo2/commits/master)
+[![Go Report Card](https://goreportcard.com/badge/gitlab.com/YottaDB/Lang/YDBGo?style=flat-square)](https://goreportcard.com/report/gitlab.com/YottaDB/Lang/YDBGo2)
+[![Go Doc](https://img.shields.io/badge/godoc-reference-blue.svg?style=flat-square)](http://godoc.org/gitlab.com/YottaDB/Lang/YDBGo2)
 [![Coverage report](https://gitlab.com/YottaDB/Lang/YDBGo2/badges/master/coverage.svg?job=coverage)](https://gitlab.com/YottaDB/Lang/YDBGo2/-/jobs)
 
 # Using YDBGo to write application
