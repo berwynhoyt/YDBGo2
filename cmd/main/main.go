@@ -13,12 +13,12 @@
 package main
 
 import (
-	"yottadb"
+	"lang.yottadb.com/go/yottadb"
 )
 
 func main() {
 	db := yottadb.New()
 	n := db.New("^var", "sub1")
 	n.Dump()
-	n.Set(3)
+	n.Set("3")
 }

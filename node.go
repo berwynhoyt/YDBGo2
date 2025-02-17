@@ -17,9 +17,7 @@ import (
 	"unsafe"
 )
 
-/* #cgo CFLAGS: -I/usr/local/lib/yottadb/r201
-#include "libyottadb.h"
-*/
+// #include "libyottadb.h"
 import "C"
 
 // Type `connection` stores the transaction token and provides a buffer for error messages from YottaDB.
