@@ -10,9 +10,10 @@
 //
 //////////////////////////////////////////////////////////////////
 
-package main
+package yottadb
 
 import (
+	"runtime"
 	"unsafe"
 )
 
@@ -24,20 +25,26 @@ import "C"
 // Type `connection` stores the transaction token and provides a buffer for error messages from YottaDB.
 // You must use a different connection for each thread.
 type connection struct {
-	tptoken uint64
-	errstr  []byte
+	tptoken  C.uint64_t
+	errstrGo [C.YDB_MAX_ERRORMSG]byte // Go-allocated storage space pointed to by errstrC below
+	errstrC  C.ydb_buffer_t
 }
 
 // Create a new connection for the current thread.
 func New() (db *connection) {
 	db = new(connection)
-	db.errstr = make([]byte, 1024) // default errstr len
+	db.tptoken = C.YDB_NOTTP
 	return db
 }
 
-// Adjust the maximum error message length for the connection instance
-func (db *connection) SetMaxErr(errlen int) {
-	db.errstr = make([]byte, errlen)
+// Return previous error message as an `error` type or nil if there was no error
+func (db *connection) Error(code C.int) error {
+	if code == C.YDB_OK {
+		return nil
+	}
+	// Take a copy of errstr as a Go String
+	msg := C.GoStringN(db.errstrC.buf_addr, C.int(db.errstrC.len_used))
+	return Error(int(code), msg)
 }
 
 // Type `node` stores strings that reference a YottaDB node, supporting fast calls to the YottaDB C API.
@@ -60,6 +67,9 @@ type node struct {
 // Store all the supplied strings (varname and subscripts) in the Node object along with array of C.ydb_buffer_t
 // that points each successive string to provide fast access to YottaDB API functions.
 func (db *connection) New(subscripts ...string) (n *node) {
+	if len(subscripts) == 0 {
+		panic("YDB: supply node type with at least one string (typically varname)")
+	}
 	n = new(node)
 	n.conn = *db
 	//n.buffers = make(C.ydb_buffer_t, len(subscripts))
@@ -69,10 +79,10 @@ func (db *connection) New(subscripts ...string) (n *node) {
 		// Retain a reference to each string in a Go splice
 		n.bufGo[i] = s
 		// Also point to these strings with a C array of ydb_buffer_t
-		buf := &n.bufC[i]
+		buf := n.bufC[i]
 		buf.buf_addr = (*C.char)(unsafe.Pointer(unsafe.StringData(s)))
 		buf.len_alloc = C.uint(len(s))
-		buf.len_used = C.uint(len(s))
+		buf.len_used = buf.len_alloc
 	}
 	return n
 }
@@ -83,8 +93,15 @@ func (n *node) Dump() {
 	}
 }
 
-func main() {
-	db := New()
-	n := db.New("abc", "def", "ghi")
-	n.Dump()
+func (n *node) Set(val string) error {
+	// Create a ydb_buffer_t pointing to go string
+	var valC C.ydb_buffer_t
+	valC.buf_addr = (*C.char)(unsafe.Pointer(unsafe.StringData(val)))
+	valC.len_alloc = C.uint(len(val))
+	valC.len_used = valC.len_alloc
+
+	ret := C.ydb_set_st(n.conn.tptoken, &n.conn.errstrC, &n.bufC[0], C.int(len(n.bufGo)-1), &n.bufC[1], &valC)
+	runtime.KeepAlive(valC) // ensure valC hangs around until after the function call returns
+
+	return n.conn.Error(ret)
 }
