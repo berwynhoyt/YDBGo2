@@ -29,22 +29,33 @@ import "C"
 // / Contains the transaction token and provides a buffer for subsequent calls to YottaDB.
 // You must use a different connection for each thread.
 type Conn struct {
-	tptoken C.uint64_t
-	space   []byte // Will become Go-allocated storage space pointed to by errstr below
-	errstr  C.ydb_buffer_t
-	pinner  runtime.Pinner
+	tptoken  C.uint64_t
+	errSpace []byte // will be Go-allocated storage space pointed to by errstr below
+	errstr   C.ydb_buffer_t
+	tmpSpace []byte // will be Go-allocated storage space for tmp usage, pointed to by tmp below
+	tmp      C.ydb_buffer_t
+	pinner   runtime.Pinner
 }
 
 // / Create a new connection for the current thread.
 func NewConn() *Conn {
 	conn := new(Conn)
 	conn.tptoken = C.YDB_NOTTP
-	conn.space = make([]byte, C.YDB_MAX_ERRORMSG)
-	spaceUnsafe := unsafe.SliceData(conn.space)
+	// Create space for err
+	conn.errSpace = make([]byte, C.YDB_MAX_ERRORMSG)
+	spaceUnsafe := unsafe.SliceData(conn.errSpace)
 	conn.pinner.Pin(spaceUnsafe)
 	conn.errstr.buf_addr = (*C.char)(unsafe.Pointer(spaceUnsafe))
-	conn.errstr.len_alloc = C.uint(len(conn.space))
+	conn.errstr.len_alloc = C.uint(len(conn.errSpace))
 	conn.errstr.len_used = 0
+	// Create space for tmp API call usage
+	conn.tmpSpace = make([]byte, 1024)
+	spaceUnsafe = unsafe.SliceData(conn.tmpSpace)
+	conn.pinner.Pin(spaceUnsafe)
+	conn.tmp.buf_addr = (*C.char)(unsafe.Pointer(spaceUnsafe))
+	conn.tmp.len_alloc = C.uint(len(conn.tmpSpace))
+	conn.tmp.len_used = 0
+
 	runtime.AddCleanup(conn, func(p *runtime.Pinner) {
 		p.Unpin()
 	}, &conn.pinner)
@@ -124,16 +135,11 @@ func (n *node) String() string {
 // / Set
 func (n *node) Set(val string) error {
 	// Create a ydb_buffer_t pointing to go string
-	var valC C.ydb_buffer_t
-	space := unsafe.StringData(val)
-	var pinner runtime.Pinner
-	defer pinner.Unpin()
-	pinner.Pin(space)
-	valC.buf_addr = (*C.char)(unsafe.Pointer(space))
-	valC.len_alloc = C.uint(len(val))
-	valC.len_used = valC.len_alloc
+	C.memcpy(unsafe.Pointer(n.conn.tmp.buf_addr), unsafe.Pointer(unsafe.StringData(val)), C.size_t(len(val)))
+	n.conn.tmp.len_used = C.uint(len(val))
 
-	ret := C.ydb_set_st(n.conn.tptoken, &n.conn.errstr, &n.bufC[0], C.int(len(n.bufGo)-1), &n.bufC[1], &valC)
+	ret := C.ydb_set_st(n.conn.tptoken, &n.conn.errstr, &n.bufC[0], C.int(len(n.bufGo)-1), &n.bufC[1], &n.conn.tmp)
+
 	return n.conn.Error(ret)
 }
 
