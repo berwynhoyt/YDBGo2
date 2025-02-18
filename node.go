@@ -28,6 +28,9 @@ import "C"
 
 // / Contains the transaction token and provides a buffer for subsequent calls to YottaDB.
 // You must use a different connection for each thread.
+// BEN: this should be called Connection so it's exported, so callers can refer to the type
+//
+//	(though Conn would be fine; that's a fairly common abbreviation in Go, eg: net.Conn)
 type connection struct {
 	tptoken C.uint64_t
 	space   []byte // Will become Go-allocated storage space pointed to by errstr below
@@ -36,8 +39,9 @@ type connection struct {
 }
 
 // / Create a new connection for the current thread.
-func New() (conn *connection) {
-	conn = new(connection)
+// BEN: seeing this here now, it should probably be called NewConn to avoid confusion with Conn.New
+func New() *connection {
+	conn := new(connection)
 	conn.tptoken = C.YDB_NOTTP
 	conn.space = make([]byte, C.YDB_MAX_ERRORMSG)
 	spaceUnsafe := unsafe.SliceData(conn.space)
@@ -45,9 +49,9 @@ func New() (conn *connection) {
 	conn.errstr.buf_addr = (*C.char)(unsafe.Pointer(spaceUnsafe))
 	conn.errstr.len_alloc = C.uint(len(conn.space))
 	conn.errstr.len_used = 0
-	runtime.AddCleanup(conn, func(p runtime.Pinner) {
+	runtime.AddCleanup(conn, func(p *runtime.Pinner) {
 		p.Unpin()
-	}, conn.pinner)
+	}, &conn.pinner)
 	return conn
 }
 
@@ -71,7 +75,7 @@ func (conn *connection) Error(code C.int) error {
 // another thread). There is a mutable version of Node emitted by Node iterators (FOR loops over Node), which
 // may not be shared with other threads except by first taking an immutable Node.Copy() of it.
 type node struct {
-	conn    connection
+	conn    *connection
 	bufGo   []string
 	bufC    [C.YDB_MAX_SUBS + 1]C.ydb_buffer_t
 	pinner  runtime.Pinner
@@ -86,12 +90,10 @@ func (conn *connection) New(subscripts ...string) (n *node) {
 		panic("YDB: supply node type with at least one string (typically varname)")
 	}
 	n = new(node)
-	n.conn = *conn
+	n.conn = conn
 	n.mutable = false
-	n.bufGo = make([]string, len(subscripts))
+	n.bufGo = subscripts
 	for i, s := range subscripts {
-		// Retain a reference to each string in a Go splice
-		n.bufGo[i] = s
 		// Also point to these strings with a C array of ydb_buffer_t
 		buf := &n.bufC[i]
 		sUnsafe := unsafe.StringData(s)
@@ -100,9 +102,9 @@ func (conn *connection) New(subscripts ...string) (n *node) {
 		buf.len_alloc = C.uint(len(s))
 		buf.len_used = buf.len_alloc
 	}
-	runtime.AddCleanup(n, func(p runtime.Pinner) {
+	runtime.AddCleanup(n, func(p *runtime.Pinner) {
 		p.Unpin()
-	}, n.pinner)
+	}, &n.pinner)
 	return n
 }
 
@@ -129,13 +131,13 @@ func (n *node) Set(val string) error {
 	var valC C.ydb_buffer_t
 	space := unsafe.StringData(val)
 	var pinner runtime.Pinner
+	defer pinner.Unpin()
 	pinner.Pin(space)
 	valC.buf_addr = (*C.char)(unsafe.Pointer(space))
 	valC.len_alloc = C.uint(len(val))
 	valC.len_used = valC.len_alloc
 
 	ret := C.ydb_set_st(n.conn.tptoken, &n.conn.errstr, &n.bufC[0], C.int(len(n.bufGo)-1), &n.bufC[1], &valC)
-	pinner.Unpin()
 
 	return n.conn.Error(ret)
 }
@@ -147,6 +149,7 @@ func (n *node) Get(deflt ...string) (string, error) {
 	// Create a Go buffer to store returned string
 	space := make([]byte, InitialBufSize)
 	var pinner runtime.Pinner
+	defer pinner.Unpin()
 	pinner.Pin(&space[0])
 	// Point to the space with a ydb_buffer_t
 	var buf C.ydb_buffer_t
@@ -173,6 +176,5 @@ func (n *node) Get(deflt ...string) (string, error) {
 		value = C.GoStringN(buf.buf_addr, C.int(buf.len_used))
 	}
 
-	pinner.Unpin()
 	return value, n.conn.Error(err)
 }
