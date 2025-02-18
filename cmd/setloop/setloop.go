@@ -15,7 +15,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"runtime"
 	"strconv"
 
 	"lang.yottadb.com/go/yottadb"
@@ -32,12 +31,12 @@ func main() {
 	// Iterate the SET command to benchmark it
 	var i int
 	for i = range iterations {
+		// BEN: note that you're also benchmarking Itoa here, and it's significant (>10%) in my local tests
 		n.Set(strconv.Itoa(i))
 	}
 
 	// Read data back to verify that the correct data went into the database
 	str, err := n.Get("Default")
-	runtime.KeepAlive(db)
 	if err != nil {
 		panic(err)
 	}
