@@ -18,10 +18,6 @@ import (
 	"unsafe"
 )
 
-// TODO: Like YDBGo v1, this uses runtime.KeepAlive to keep Go data in place for use by C. This is risky and may not be reliable.
-// It should be changed to use runtime.Pinner. I have not done so yet as I want a benchmark first to see the difference in speed due to Pinner.
-// Moving it to Pinner will also allow the allocation code to be factored into a function to avoid code duplication.
-
 // #include "libyottadb.h"
 import "C"
 
@@ -140,7 +136,6 @@ func (n *node) Set(val string) error {
 
 	ret := C.ydb_set_st(n.conn.tptoken, &n.conn.errstr, &n.bufC[0], C.int(len(n.bufGo)-1), &n.bufC[1], &valC)
 	pinner.Unpin()
-	//	runtime.KeepAlive(valC) // ensure valC data hangs around until after the function call returns
 
 	return n.conn.Error(ret)
 }
