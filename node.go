@@ -28,10 +28,7 @@ import "C"
 
 // / Contains the transaction token and provides a buffer for subsequent calls to YottaDB.
 // You must use a different connection for each thread.
-// BEN: this should be called Connection so it's exported, so callers can refer to the type
-//
-//	(though Conn would be fine; that's a fairly common abbreviation in Go, eg: net.Conn)
-type connection struct {
+type Conn struct {
 	tptoken C.uint64_t
 	space   []byte // Will become Go-allocated storage space pointed to by errstr below
 	errstr  C.ydb_buffer_t
@@ -39,9 +36,8 @@ type connection struct {
 }
 
 // / Create a new connection for the current thread.
-// BEN: seeing this here now, it should probably be called NewConn to avoid confusion with Conn.New
-func New() *connection {
-	conn := new(connection)
+func NewConn() *Conn {
+	conn := new(Conn)
 	conn.tptoken = C.YDB_NOTTP
 	conn.space = make([]byte, C.YDB_MAX_ERRORMSG)
 	spaceUnsafe := unsafe.SliceData(conn.space)
@@ -56,7 +52,7 @@ func New() *connection {
 }
 
 // / Return previous error message as an `error` type or nil if there was no error
-func (conn *connection) Error(code C.int) error {
+func (conn *Conn) Error(code C.int) error {
 	if code == C.YDB_OK {
 		return nil
 	}
@@ -75,7 +71,7 @@ func (conn *connection) Error(code C.int) error {
 // another thread). There is a mutable version of Node emitted by Node iterators (FOR loops over Node), which
 // may not be shared with other threads except by first taking an immutable Node.Copy() of it.
 type node struct {
-	conn    *connection
+	conn    *Conn
 	bufGo   []string
 	bufC    [C.YDB_MAX_SUBS + 1]C.ydb_buffer_t
 	pinner  runtime.Pinner
@@ -85,7 +81,7 @@ type node struct {
 // / Create a `node` instance that represents a database node and has all of the class methods defined below.
 // Store all the supplied strings (varname and subscripts) in the Node object along with array of C.ydb_buffer_t
 // that points each successive string to provide fast access to YottaDB API functions.
-func (conn *connection) New(subscripts ...string) (n *node) {
+func (conn *Conn) New(subscripts ...string) (n *node) {
 	if len(subscripts) == 0 {
 		panic("YDB: supply node type with at least one string (typically varname)")
 	}
@@ -138,7 +134,6 @@ func (n *node) Set(val string) error {
 	valC.len_used = valC.len_alloc
 
 	ret := C.ydb_set_st(n.conn.tptoken, &n.conn.errstr, &n.bufC[0], C.int(len(n.bufGo)-1), &n.bufC[1], &valC)
-
 	return n.conn.Error(ret)
 }
 
@@ -157,7 +152,6 @@ func (n *node) Get(deflt ...string) (string, error) {
 	buf.len_alloc = C.uint(len(space))
 	buf.len_used = 0
 
-	value := ""
 	err := C.ydb_get_st(n.conn.tptoken, &n.conn.errstr, &n.bufC[0], C.int(len(n.bufGo)-1), &n.bufC[1], &buf)
 	if err == C.YDB_ERR_INVSTRLEN {
 		// Allocate a larger buffer of the specified size and try again
@@ -169,12 +163,12 @@ func (n *node) Get(deflt ...string) (string, error) {
 		err = C.ydb_get_st(n.conn.tptoken, &n.conn.errstr, &n.bufC[0], C.int(len(n.bufGo)-1), &n.bufC[1], &buf)
 	}
 	if len(deflt) > 0 && (err == C.YDB_ERR_GVUNDEF || err == C.YDB_ERR_LVUNDEF) {
-		value, err = deflt[0], C.YDB_OK
+		return deflt[0], n.conn.Error(C.YDB_OK)
 	}
-	if err == C.YDB_OK {
-		// take a copy of the string so that we can release `space`
-		value = C.GoStringN(buf.buf_addr, C.int(buf.len_used))
+	if err != C.YDB_OK {
+		return "", n.conn.Error(err)
 	}
-
-	return value, n.conn.Error(err)
+	// take a copy of the string so that we can release `space`
+	value := C.GoStringN(buf.buf_addr, C.int(buf.len_used))
+	return value, nil
 }

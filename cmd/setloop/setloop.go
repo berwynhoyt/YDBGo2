@@ -23,7 +23,7 @@ import (
 func main() {
 	iterations, _ := strconv.Atoi(os.Args[1])
 
-	db := yottadb.New()
+	db := yottadb.NewConn()
 	//n := db.New("^var", "sub1")
 	//fmt.Println(n)
 	n := db.New("x")
@@ -31,7 +31,6 @@ func main() {
 	// Iterate the SET command to benchmark it
 	var i int
 	for i = range iterations {
-		// BEN: note that you're also benchmarking Itoa here, and it's significant (>10%) in my local tests
 		n.Set(strconv.Itoa(i))
 	}
 
