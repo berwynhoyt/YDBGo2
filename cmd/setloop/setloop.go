@@ -13,12 +13,35 @@
 package main
 
 import (
+	"fmt"
+	"os"
+	"runtime"
+	"strconv"
+
 	"lang.yottadb.com/go/yottadb"
 )
 
 func main() {
+	iterations, _ := strconv.Atoi(os.Args[1])
+
 	db := yottadb.New()
-	n := db.New("^var", "sub1")
-	n.Dump()
-	n.Set("3")
+	//n := db.New("^var", "sub1")
+	//fmt.Println(n)
+	n := db.New("x")
+
+	// Iterate the SET command to benchmark it
+	var i int
+	for i = range iterations {
+		n.Set(strconv.Itoa(i))
+	}
+
+	// Read data back to verify that the correct data went into the database
+	str, err := n.Get("Default")
+	runtime.KeepAlive(db)
+	if err != nil {
+		panic(err)
+	}
+	if str != strconv.Itoa(i) {
+		panic(fmt.Errorf("Expected result %d but got %s", i, str))
+	}
 }

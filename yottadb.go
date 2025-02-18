@@ -11,7 +11,7 @@
 //////////////////////////////////////////////////////////////////
 
 // This package is a Go wrapper for a YottaDB database using the SimplaAPI interface.
-// It requires Go 1.24 to achieve best speed and its use of AddCleanup() instead of SetFinalizer()
+// It requires Go 1.24 to achieve best speed and its use of AddCleanup() instead of SetFinalizer().
 //
 // This wrapper uses 'cgo' to interface between this Go wrapper and the YottaDB engine written in C.
 // Its use of the `node` type to pin memory references to database subscript strings gives it optimal speed.
@@ -36,3 +36,5 @@ const MinimumYDBRelease string = "r1.34"
 const MinimumGoRelease string = "go1.24"
 
 //go:generate ./scripts/gen_error_codes.sh
+
+const InitialBufSize = 128 // Initial size allocated to store return value of ydb_get()
