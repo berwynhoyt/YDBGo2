@@ -26,7 +26,7 @@ import "C"
 // In the meantime, it is possible to pin the memory underlying str and sl: Pin(unsafe.StringData(str))) and Pin(&sl[0]) to pin the entire slice.
 // This workaround requires Go >= 1.22 for a fix to pin(StringData): https://github.com/golang/go/issues/65286#issuecomment-1920087602.
 
-// / Contains the transaction token and provides a buffer for subsequent calls to YottaDB.
+// Contains the transaction token and provides a buffer for subsequent calls to YottaDB.
 // You must use a different connection for each thread.
 type Conn struct {
 	tptoken  C.uint64_t
@@ -37,7 +37,7 @@ type Conn struct {
 	pinner   runtime.Pinner
 }
 
-// / Create a new connection for the current thread.
+// Create a new connection for the current thread.
 func NewConn() *Conn {
 	conn := new(Conn)
 	conn.tptoken = C.YDB_NOTTP
@@ -62,7 +62,7 @@ func NewConn() *Conn {
 	return conn
 }
 
-// / Return previous error message as an `error` type or nil if there was no error
+// Return previous error message as an `error` type or nil if there was no error
 func (conn *Conn) Error(code C.int) error {
 	if code == C.YDB_OK {
 		return nil
@@ -72,13 +72,13 @@ func (conn *Conn) Error(code C.int) error {
 	return Error(int(code), msg)
 }
 
-// / Type `node` stores strings that reference a YottaDB node, supporting fast calls to the YottaDB C API.
+// Type `node` stores strings that reference a YottaDB node, supporting fast calls to the YottaDB C API.
 //
 // Instances hold references to all its subscripts as a slice of Go strings to ensure they remain allocated for C,
 // and also point to those strings using C type C.ydb_buffer_t for fast calls to the YottaDB C API. This memory retention
 // works because Go has 'non-moving' garbage collector, cf. https://tip.golang.org/doc/gc-guide#Tracing_Garbage_Collection
 //
-// Thread Safety: Regular Nodes are immutable, they are thread-safe (one thread cannot change a Node used by
+// Thread Safety: Regular Nodes are immutable, so are thread-safe (one thread cannot change a Node used by
 // another thread). There is a mutable version of Node emitted by Node iterators (FOR loops over Node), which
 // may not be shared with other threads except by first taking an immutable Node.Copy() of it.
 type node struct {
@@ -86,12 +86,12 @@ type node struct {
 	bufGo   []string
 	bufC    [C.YDB_MAX_SUBS + 1]C.ydb_buffer_t
 	pinner  runtime.Pinner
-	mutable bool
+	mutable bool // whether the node is mutable (these are only emitted by node iterators)
 }
 
-// / Create a `node` instance that represents a database node and has all of the class methods defined below.
+// Create a `node` instance that represents a database node and has all of the class methods defined below.
 // Store all the supplied strings (varname and subscripts) in the Node object along with array of C.ydb_buffer_t
-// that points each successive string to provide fast access to YottaDB API functions.
+// structs that point to each successive string to provide fast access to YottaDB API functions.
 func (conn *Conn) New(subscripts ...string) (n *node) {
 	if len(subscripts) == 0 {
 		panic("YDB: supply node type with at least one string (typically varname)")
@@ -115,7 +115,7 @@ func (conn *Conn) New(subscripts ...string) (n *node) {
 	return n
 }
 
-// / Return string representation of this database node in typical YottaDB format: `varname("sub1")("sub2")`.
+// Return string representation of this database node in typical YottaDB format: `varname("sub1")("sub2")`.
 func (n *node) String() string {
 	var bld strings.Builder
 	for i := range len(n.bufGo) {
@@ -132,9 +132,14 @@ func (n *node) String() string {
 	return bld.String()
 }
 
-// / Set
+// Set
 func (n *node) Set(val string) error {
 	// Create a ydb_buffer_t pointing to go string
+	if len(val) > cap(n.conn.tmpSpace) {
+		// TODO: fix the following to realloc
+		panic("YDB: have not yet implemented reallocating conn.tmpSpace to fit such a large string")
+	}
+	// TODO: should the following line should be change to have a C wrapper that accepts _GoString_ to avoid risk of StringData moving? Or is it OK within one line (see Pointer docs)?
 	C.memcpy(unsafe.Pointer(n.conn.tmp.buf_addr), unsafe.Pointer(unsafe.StringData(val)), C.size_t(len(val)))
 	n.conn.tmp.len_used = C.uint(len(val))
 
@@ -143,7 +148,7 @@ func (n *node) Set(val string) error {
 	return n.conn.Error(ret)
 }
 
-// / Get the value of a database node.
+// Get the value of a database node.
 // On error return value "" and error
 // If deflt is supplied return string deflt[0] instead of GVUNDEF or LVUNDEF errors.
 func (n *node) Get(deflt ...string) (string, error) {
