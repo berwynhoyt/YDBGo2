@@ -24,9 +24,7 @@ func main() {
 	iterations, _ := strconv.Atoi(os.Args[1])
 
 	db := yottadb.NewConn()
-	//n := db.New("^var", "sub1")
-	//fmt.Println(n)
-	n := db.New("x")
+	n := db.New("x") // or: db.New("varname", "sub1", "sub2")
 
 	// Iterate the SET command to benchmark it
 	var i int
