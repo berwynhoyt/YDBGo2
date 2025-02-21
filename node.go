@@ -66,11 +66,11 @@ func NewConn() *Conn {
 	conn.c.value.len_alloc = C.uint(C.YDB_MAX_STR)
 	conn.c.value.len_used = 0
 
-	runtime.AddCleanup(&conn, func(conn *Conn) {
-		C.free(unsafe.Pointer(conn.c.value.buf_addr))
-		C.free(unsafe.Pointer(conn.c.errstr.buf_addr))
-		C.free(unsafe.Pointer(conn.c))
-	}, &conn)
+	runtime.AddCleanup(&conn, func(cn *C.conn) {
+		C.free(unsafe.Pointer(cn.value.buf_addr))
+		C.free(unsafe.Pointer(cn.errstr.buf_addr))
+		C.free(unsafe.Pointer(cn))
+	}, conn.c)
 	return &conn
 }
 
@@ -116,11 +116,13 @@ func (conn *Conn) New(subscripts ...string) (n *Node) {
 	// is what triggers the cgo bug mentioned in the cgo docs (https://golang.org/cmd/cgo/#hdr-Passing_pointers).
 	// TODO: but if we retain calloc, we need to check for memory error because Go doesn't create a wrapper for C.calloc like it does for C.malloc (cf. https://pkg.go.dev/cmd/cgo#hdr-Passing_pointers:~:text=C.malloc%20cannot%20fail)
 	// Alternatively, we could call malloc and then memset to clear just the ydb_buffer_t parts, but test which is faster.
+	var goNode Node
+	n = &goNode
 	n.n = (*C.node)(C.calloc(1, C.size_t(size)))
 	// Queue the cleanup function to free it
-	runtime.AddCleanup(n, func(n *Node) {
-		C.free(unsafe.Pointer(n.n))
-	}, n)
+	runtime.AddCleanup(n, func(c_n *C.node) {
+		C.free(unsafe.Pointer(c_n))
+	}, n.n)
 
 	n.conn = conn // point to the Go conn
 	c_n := n.n
@@ -128,12 +130,12 @@ func (conn *Conn) New(subscripts ...string) (n *Node) {
 	c_n.len = C.int(len(subscripts))
 	c_n.mutable = 0 // i.e. false
 
-	dataptr := unsafe.Pointer(&c_n.buffers[len(subscripts)])
+	dataptr := unsafe.Add(unsafe.Pointer(&c_n.buffers[0]), C.sizeof_ydb_buffer_t*len(subscripts))
 	C.memcpy(dataptr, unsafe.Pointer(&joiner.Bytes()[0]), C.size_t(joiner.Len()))
 
 	// Now fill in ydb_buffer_t pointers
 	for i, s := range subscripts {
-		buf := &c_n.buffers[i]
+		buf := (*C.ydb_buffer_t)(unsafe.Add(unsafe.Pointer(&c_n.buffers[0]), C.sizeof_ydb_buffer_t*i))
 		buf.buf_addr = (*C.char)(dataptr)
 		buf.len_used, buf.len_alloc = C.uint(len(s)), C.uint(len(s))
 		dataptr = unsafe.Add(dataptr, len(s))
@@ -144,9 +146,9 @@ func (conn *Conn) New(subscripts ...string) (n *Node) {
 // Return string representation of this database node in typical YottaDB format: `varname("sub1")("sub2")`.
 func (n *Node) String() string {
 	var bld strings.Builder
-	c_n := n.n // repoint Go node to C.node
+	c_n := n.n // access C.node from Go node
 	for i := range c_n.len {
-		buf := c_n.buffers[i]
+		buf := (*C.ydb_buffer_t)(unsafe.Add(unsafe.Pointer(&c_n.buffers[0]), C.sizeof_ydb_buffer_t*i))
 		s := C.GoStringN(buf.buf_addr, C.int(buf.len_used))
 		if i > 0 {
 			bld.WriteString("(\"")
@@ -162,13 +164,13 @@ func (n *Node) String() string {
 // Set
 func (n *Node) Set(val string) error {
 	// Create a ydb_buffer_t pointing to go string
-	c_n := n.n // repoint Go node to C.node
+	c_n := n.n // access C.node from Go node
 	conn := c_n.conn
 	if len(val) > int(conn.value.len_alloc) {
 		panic("YDB: tried to set database value to a string that is too large")
 	}
 	// TODO: should the following line change to have a C wrapper that accepts _GoString_ to avoid risk of StringData moving? Or is it OK within one line (see Pointer docs)?
-	C.memcpy(unsafe.Pointer(&conn.value.buf_addr), unsafe.Pointer(unsafe.StringData(val)), C.size_t(len(val)))
+	C.memcpy(unsafe.Pointer(conn.value.buf_addr), unsafe.Pointer(unsafe.StringData(val)), C.size_t(len(val)))
 	conn.value.len_used = C.uint(len(val))
 
 	ret := C.ydb_set_st(conn.tptoken, &conn.errstr, &c_n.buffers[0], c_n.len-1, (*C.ydb_buffer_t)(unsafe.Add(unsafe.Pointer(&c_n.buffers[0]), C.sizeof_ydb_buffer_t)), &conn.value)
@@ -180,7 +182,7 @@ func (n *Node) Set(val string) error {
 // On error return value "" and error
 // If deflt is supplied return string deflt[0] instead of GVUNDEF or LVUNDEF errors.
 func (n *Node) Get(deflt ...string) (string, error) {
-	c_n := n.n // repoint Go node to C.node
+	c_n := n.n // access C.node from Go node
 	conn := c_n.conn
 	err := C.ydb_get_st(conn.tptoken, &conn.errstr, &c_n.buffers[0], c_n.len-1, (*C.ydb_buffer_t)(unsafe.Add(unsafe.Pointer(&c_n.buffers[0]), C.sizeof_ydb_buffer_t)), &conn.value)
 	if err == C.YDB_ERR_INVSTRLEN {
