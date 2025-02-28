@@ -28,7 +28,7 @@ if ! [ -e "$file" ]; then
 	exit 1
 fi
 
-skipextensions="mod ci"	# List of extensions that needn't have copyrights
+skipextensions="mod sum ci"	# List of extensions that needn't have copyrights
 	# .mod -> e.g. go.mod is an auto-generated file and
 	# .ci  -> e.g. calltab.ci stores the call-in table
 

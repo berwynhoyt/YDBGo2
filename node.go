@@ -10,6 +10,8 @@
 //
 //////////////////////////////////////////////////////////////////
 
+// Define Node type for access YottaDB database
+
 package yottadb
 
 import (
@@ -33,7 +35,7 @@ typedef struct node {
 	int len;		// number of buffers[] allocated to store subscripts/strings
 	int datasize;		// length of string `data` field (all strings and subscripts concatenated)
 	int mutable;		// whether the node is mutable (these are only emitted by node iterators)
-	ydb_buffer_t buffers[1];	// first of an array of buffers
+	ydb_buffer_t buffers[1];	// first of an array of buffers (typically varname)
 	ydb_buffer_t buffersn[];	// rest of array
 	// char *data;		// stored after `buffers` (however large they are), which point into this data
 } node;
@@ -52,6 +54,9 @@ type Conn struct {
 
 // Create a new connection for the current thread.
 func NewConn() *Conn {
+	// TODO: This is set to YDB_MAX_STR (1MB) for the initial version only. Later we can reduce its initial value and create logic to reallocate it when necessary,
+	//       e.g. in n.Set()
+	const initialSpace = C.YDB_MAX_STR
 	var conn Conn
 	conn.c = (*C.conn)(C.malloc(C.sizeof_conn))
 	conn.c.tptoken = C.YDB_NOTTP
@@ -60,10 +65,8 @@ func NewConn() *Conn {
 	conn.c.errstr.len_alloc = C.YDB_MAX_ERRORMSG
 	conn.c.errstr.len_used = 0
 	// Create initial space for value used by various API call/return
-	// TODO: This is set to YDB_MAX_STR (1MB) for the initial version only. Later we can reduce its initial value and create logic to reallocate it when necessary,
-	//       e.g. in n.Set()
-	conn.c.value.buf_addr = (*C.char)(C.malloc(C.YDB_MAX_STR))
-	conn.c.value.len_alloc = C.uint(C.YDB_MAX_STR)
+	conn.c.value.buf_addr = (*C.char)(C.malloc(initialSpace))
+	conn.c.value.len_alloc = C.uint(initialSpace)
 	conn.c.value.len_used = 0
 
 	runtime.AddCleanup(&conn, func(cn *C.conn) {
@@ -99,18 +102,16 @@ type Node struct {
 
 // Create a `Node` instance that represents a database node with class methods for fast calls to YottaDB.
 // The strings and array are stored in C-allocated space to give Node methods fast access to YottaDB API functions.
-func (conn *Conn) New(subscripts ...string) (n *Node) {
-	if len(subscripts) == 0 {
-		panic("YDB: supply node type with at least one string (typically varname)")
-	}
+func (conn *Conn) Node(varname string, subscripts ...string) (n *Node) {
 	// Concatenate strings the fastest Go way.
 	// This involves creating an extra copy of subscripts but is probably faster than one C.memcpy call per subscript
 	var joiner bytes.Buffer
+	joiner.WriteString(varname)
 	for _, s := range subscripts {
 		joiner.WriteString(s)
 	}
 
-	size := C.sizeof_node + C.sizeof_ydb_buffer_t*len(subscripts) - 1 + joiner.Len() // -1 because 1 buffer already included in sizeof_node
+	size := C.sizeof_node + C.sizeof_ydb_buffer_t*len(subscripts) + joiner.Len()
 	// This initial call must be to calloc() to get initialized (cleared) storage. We cannot allocate it and then
 	// do another call to initialize it as that means uninitialized memory is traversing the cgo boundary which
 	// is what triggers the cgo bug mentioned in the cgo docs (https://golang.org/cmd/cgo/#hdr-Passing_pointers).
@@ -127,15 +128,20 @@ func (conn *Conn) New(subscripts ...string) (n *Node) {
 	n.conn = conn // point to the Go conn
 	c_n := n.n
 	c_n.conn = (*C.conn)(unsafe.Pointer(conn.c)) // point to the C version of the conn
-	c_n.len = C.int(len(subscripts))
+	c_n.len = C.int(len(subscripts) + 1)
 	c_n.mutable = 0 // i.e. false
 
-	dataptr := unsafe.Add(unsafe.Pointer(&c_n.buffers[0]), C.sizeof_ydb_buffer_t*len(subscripts))
+	dataptr := unsafe.Add(unsafe.Pointer(&c_n.buffers[0]), C.sizeof_ydb_buffer_t*(len(subscripts)+1))
 	C.memcpy(dataptr, unsafe.Pointer(&joiner.Bytes()[0]), C.size_t(joiner.Len()))
 
 	// Now fill in ydb_buffer_t pointers
+	s := varname
+	buf := (*C.ydb_buffer_t)(unsafe.Pointer(&c_n.buffers[0]))
+	buf.buf_addr = (*C.char)(dataptr)
+	buf.len_used, buf.len_alloc = C.uint(len(s)), C.uint(len(s))
+	dataptr = unsafe.Add(dataptr, len(s))
 	for i, s := range subscripts {
-		buf := (*C.ydb_buffer_t)(unsafe.Add(unsafe.Pointer(&c_n.buffers[0]), C.sizeof_ydb_buffer_t*i))
+		buf := (*C.ydb_buffer_t)(unsafe.Add(unsafe.Pointer(&c_n.buffers[0]), C.sizeof_ydb_buffer_t*(i+1)))
 		buf.buf_addr = (*C.char)(dataptr)
 		buf.len_used, buf.len_alloc = C.uint(len(s)), C.uint(len(s))
 		dataptr = unsafe.Add(dataptr, len(s))
