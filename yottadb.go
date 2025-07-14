@@ -27,7 +27,7 @@ import "C"
 // on new content, either the third piece of the version will be bumped to an even value or the second piece of the
 // version will be bumped by 1 and the third piece of the version set to 0. On rare occasions, we may bump the first
 // piece of the version and zero the others when the changes are significant.
-const WrapperRelease string = "v1.2.6"
+const WrapperRelease string = "v2.0.0"
 
 // MinimumYDBRelease - (string) Minimum YottaDB release name required by this wrapper
 const MinimumYDBRelease string = "r1.34"
